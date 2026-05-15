@@ -11,9 +11,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4.6.1", features = ["derive", "env"] }
 anyhow = "1.0.102"
-thiserror = "2.0.18"
 nom-exif = "2.7.0"
-quick-xml = "0.39.2"
 sha2 = "0.10"
 hex = "0.4.3"
 walkdir = "2.5.0"

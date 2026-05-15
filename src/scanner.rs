@@ -14,9 +14,12 @@ pub fn scan(
     filters: &FiltersConfig,
     livephoto_cfg: &LivePhotoConfig,
 ) -> Result<Vec<MediaFile>> {
+    // Normalize path: avoid Windows UNC prefix (\\?\) which breaks some APIs
+    let source = dunce::canonicalize(source)
+        .unwrap_or_else(|_| source.to_path_buf());
     info!(source = %source.display(), "开始扫描");
 
-    let mut walker = WalkDir::new(source);
+    let mut walker = WalkDir::new(&source);
     if !recursive {
         walker = walker.max_depth(1);
     } else if max_depth > 0 {

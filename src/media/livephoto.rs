@@ -106,3 +106,73 @@ fn extract_xmp_attr(xmp: &str, attr: &str) -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── xmp_has_motion_photo ──
+
+    #[test]
+    fn motion_photo_camera_double_quote() {
+        assert!(xmp_has_motion_photo(r#"some xmp Camera:MotionPhoto="1" more"#));
+    }
+
+    #[test]
+    fn motion_photo_gcamera_double_quote() {
+        assert!(xmp_has_motion_photo(r#"some xmp GCamera:MotionPhoto="1" more"#));
+    }
+
+    #[test]
+    fn motion_photo_microvideo_double_quote() {
+        assert!(xmp_has_motion_photo(r#"some xmp MicroVideo:MicroVideo="1" more"#));
+    }
+
+    #[test]
+    fn motion_photo_single_quote() {
+        assert!(xmp_has_motion_photo(r#"Camera:MotionPhoto='1'"#));
+    }
+
+    #[test]
+    fn motion_photo_empty_string() {
+        assert!(!xmp_has_motion_photo(""));
+    }
+
+    #[test]
+    fn motion_photo_no_match() {
+        assert!(!xmp_has_motion_photo(r#"Camera:MotionPhoto="0" some other data"#));
+    }
+
+    // ── extract_xmp_attr ──
+
+    #[test]
+    fn extract_attr_double_quote() {
+        let xmp = r#"apple-fi:Identifier="ABC-123-DEF""#;
+        assert_eq!(extract_xmp_attr(xmp, "apple-fi:Identifier"), Some("ABC-123-DEF".to_string()));
+    }
+
+    #[test]
+    fn extract_attr_single_quote() {
+        let xmp = r#"apple-fi:Identifier='XYZ-789'"#;
+        assert_eq!(extract_xmp_attr(xmp, "apple-fi:Identifier"), Some("XYZ-789".to_string()));
+    }
+
+    #[test]
+    fn extract_attr_no_match() {
+        let xmp = r#"some other data"#;
+        assert_eq!(extract_xmp_attr(xmp, "apple-fi:Identifier"), None);
+    }
+
+    #[test]
+    fn extract_attr_empty_xmp() {
+        assert_eq!(extract_xmp_attr("", "key"), None);
+    }
+
+    // ── read_jpeg_xmp ──
+
+    #[test]
+    fn read_xmp_nonexistent_file() {
+        let result = read_jpeg_xmp(Path::new("/nonexistent/path/file.jpg"));
+        assert!(result.is_err());
+    }
+}

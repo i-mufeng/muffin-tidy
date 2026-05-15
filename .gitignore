@@ -2,3 +2,5 @@
 *.toml.bak
 mediasort.toml
 *.log
+.idea
+.claude
