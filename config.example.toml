@@ -1,0 +1,34 @@
+# Muffin-Tidy 配置文件示例
+# 复制为 mtidy.toml 并按需修改
+
+[general]
+recursive = true
+max_depth = 0                   # 0 = 不限制
+include_hidden = false
+threads = 0                     # 0 = 自动检测 CPU 核数
+dry_run = false
+
+[logging]
+level = "info"                  # error | warn | info | debug | trace
+format = "text"                 # text | json
+file = ""                       # 留空则不输出到文件
+show_progress = true
+show_summary = true
+
+[export]
+no_dedup = false
+
+[filters]
+# 指定要包含的扩展名白名单（留空则全部支持的格式）
+include_extensions = []
+# 指定要排除的扩展名
+exclude_extensions = []
+# 文件大小过滤（字节），0 = 不限制
+min_file_size = 0
+max_file_size = 0
+
+[livephoto]
+enabled = true                  # 是否启用 LivePhoto 识别
+match_by_content_id = true      # 优先通过 ContentIdentifier 匹配
+match_by_filename = true        # 备用：通过同名文件匹配
+android_motion_photo = true     # 是否识别 Android Motion Photo

@@ -54,7 +54,7 @@ mtidy --source /path/a --source /path/b --target /path/to/output
 mtidy --source ./photos --target ./output --dry-run
 
 # 设置日志等级
-MEDIASORT_LOG=debug mtidy --source ./photos --target ./output
+MTIDY_LOG=debug mtidy --source ./photos --target ./output
 
 # JSON 格式日志
 mtidy --source ./photos --target ./output --log-format json
@@ -80,7 +80,7 @@ output/
 |------|--------|------|
 | `-s, --source` | 必填 | 源目录（可重复指定多个） |
 | `-t, --target` | 必填 | 目标目录 |
-| `-c, --config` | `mediasort.toml` | 配置文件路径 |
+| `-c, --config` | `mtidy.toml` | 配置文件路径 |
 | `--dry-run` | false | 仅预览，不复制 |
 | `--no-dedup` | false | 跳过去重检查 |
 | `--recursive` | true | 递归扫描子目录 |
@@ -112,7 +112,6 @@ show_summary = true
 
 [export]
 no_dedup = false
-overwrite_existing = false
 
 [filters]
 include_extensions = []

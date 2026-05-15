@@ -54,7 +54,7 @@ mtidy --source /path/a --source /path/b --target /path/to/output
 mtidy --source ./photos --target ./output --dry-run
 
 # Set log level
-MEDIASORT_LOG=debug mtidy --source ./photos --target ./output
+MTIDY_LOG=debug mtidy --source ./photos --target ./output
 
 # JSON log output
 mtidy --source ./photos --target ./output --log-format json
@@ -80,7 +80,7 @@ Types: `Img` (image), `Vdo` (video), `Lpo` (Live Photo / Motion Photo)
 |------|---------|-------------|
 | `-s, --source` | required | Source directory (repeatable) |
 | `-t, --target` | required | Target directory |
-| `-c, --config` | `mediasort.toml` | Config file path |
+| `-c, --config` | `mtidy.toml` | Config file path |
 | `--dry-run` | false | Preview only, no copying |
 | `--no-dedup` | false | Skip deduplication |
 | `--recursive` | true | Recurse into subdirectories |
@@ -112,7 +112,6 @@ show_summary = true
 
 [export]
 no_dedup = false
-overwrite_existing = false
 
 [filters]
 include_extensions = []

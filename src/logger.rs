@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fmt::Write as FmtWrite;
 use std::sync::{Arc, Mutex};
 use std::fs::File;
@@ -35,27 +33,42 @@ pub fn init_logger(config: &LogConfig) {
     use tracing_subscriber::EnvFilter;
 
     // 抑制 nom-exif 内部对未知 tag 的 WARN 噪音（如 DNG 私有 tag 0xc6fc）
-    // 使用 builder 确保 nom_exif=error 始终生效，不被环境变量覆盖
     let filter_str = format!("{},nom_exif=error", &config.level);
     let filter = EnvFilter::builder()
         .with_default_directive(tracing::Level::INFO.into())
         .parse_lossy(&filter_str);
-    let use_color = std::io::IsTerminal::is_terminal(&std::io::stdout());
 
-    let log_file = config.file.as_ref().map(|p| {
-        Arc::new(Mutex::new(
-            File::create(p).expect("无法创建日志文件"),
-        ))
-    });
-
-    let spring_layer = SpringBootLayer { use_color, log_file };
-
-    let subscriber = tracing_subscriber::registry()
-        .with(filter)
-        .with(spring_layer);
-
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set global tracing subscriber");
+    match config.format {
+        crate::config::LogFormat::Json => {
+            let fmt_layer = tracing_subscriber::fmt::layer()
+                .json()
+                .with_writer(std::io::stdout);
+            let subscriber = tracing_subscriber::registry()
+                .with(filter)
+                .with(fmt_layer);
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("Failed to set global tracing subscriber");
+        }
+        crate::config::LogFormat::Text => {
+            let use_color = std::io::IsTerminal::is_terminal(&std::io::stdout());
+            let log_file = match &config.file {
+                Some(p) => match File::create(p) {
+                    Ok(f) => Some(Arc::new(Mutex::new(f))),
+                    Err(e) => {
+                        eprintln!("警告：无法创建日志文件 {}: {}", p.display(), e);
+                        None
+                    }
+                },
+                None => None,
+            };
+            let spring_layer = SpringBootLayer { use_color, log_file };
+            let subscriber = tracing_subscriber::registry()
+                .with(filter)
+                .with(spring_layer);
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("Failed to set global tracing subscriber");
+        }
+    }
 }
 
 pub struct SpringBootLayer {
@@ -134,8 +147,10 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for SpringBootLayer {
 }
 
 fn pad_or_truncate(s: &str, width: usize) -> String {
-    if s.len() >= width {
-        s[s.len() - width..].to_string()
+    let char_count = s.chars().count();
+    if char_count >= width {
+        // Take the last `width` characters (safe for multi-byte UTF-8)
+        s.chars().skip(char_count - width).collect()
     } else {
         format!("{:width$}", s, width = width)
     }

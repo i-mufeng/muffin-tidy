@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::Path;
 use super::MediaType;
 
@@ -28,6 +26,3 @@ pub fn detect_media_type(path: &Path) -> Option<MediaType> {
     }
 }
 
-pub fn is_supported(path: &Path) -> bool {
-    detect_media_type(path).is_some()
-}

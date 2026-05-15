@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
@@ -44,9 +42,10 @@ pub fn compute_hash(path: &Path) -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-/// Compute hashes for all files in parallel using rayon, with a progress bar.
+/// Compute hashes for all files in parallel using rayon.
 /// `threads`: 0 = auto (capped at 4 to avoid I/O flooding), otherwise use specified count.
-pub fn compute_hashes_parallel(files: &mut Vec<MediaFile>, threads: usize) {
+/// `show_progress`: whether to display a progress bar.
+pub fn compute_hashes_parallel(files: &mut Vec<MediaFile>, threads: usize, show_progress: bool) {
     if files.is_empty() {
         return;
     }
@@ -59,22 +58,28 @@ pub fn compute_hashes_parallel(files: &mut Vec<MediaFile>, threads: usize) {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()
-        .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap());
+        .or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build())
+        .expect("Failed to create thread pool");
 
     let total_files = files.len();
     let total_bytes: u64 = files.iter().map(|f| f.file_size).sum();
 
-    let pb = Arc::new(ProgressBar::new(total_bytes));
-    pb.set_style(
-        ProgressStyle::with_template(
-            "  {spinner:.cyan} [{elapsed_precise}] [{bar:38.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}) {msg}"
-        )
-        .unwrap_or_else(|_| ProgressStyle::default_bar())
-        .progress_chars("=>-"),
-    );
-    pb.set_message(format!("0/{} 文件", total_files));
-    pb.enable_steady_tick(Duration::from_millis(80));
-    logger::set_progress_bar(pb.clone());
+    let pb = if show_progress {
+        let pb = Arc::new(ProgressBar::new(total_bytes));
+        pb.set_style(
+            ProgressStyle::with_template(
+                "  {spinner:.cyan} [{elapsed_precise}] [{bar:38.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}) {msg}"
+            )
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("=>-"),
+        );
+        pb.set_message(format!("0/{} 文件", total_files));
+        pb.enable_steady_tick(Duration::from_millis(80));
+        logger::set_progress_bar(pb.clone());
+        Some(pb)
+    } else {
+        None
+    };
 
     let completed = Arc::new(AtomicUsize::new(0));
 
@@ -89,16 +94,20 @@ pub fn compute_hashes_parallel(files: &mut Vec<MediaFile>, threads: usize) {
                         None
                     }
                 };
-                let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                pb.inc(f.file_size);
-                pb.set_message(format!("{}/{} 文件", done, total_files));
+                if let Some(ref pb) = pb {
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    pb.inc(f.file_size);
+                    pb.set_message(format!("{}/{} 文件", done, total_files));
+                }
                 result
             })
             .collect()
     });
 
-    pb.finish_and_clear();
-    logger::clear_progress_bar();
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+        logger::clear_progress_bar();
+    }
 
     for (f, h) in files.iter_mut().zip(hashes) {
         f.file_hash = h;

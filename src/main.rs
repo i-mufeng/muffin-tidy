@@ -31,11 +31,11 @@ fn main() -> Result<()> {
     // 2. Compute hashes (parallel)
     if !cfg.no_dedup {
         info!("开始计算文件哈希");
-        dedup::compute_hashes_parallel(&mut all_files, cfg.threads);
+        dedup::compute_hashes_parallel(&mut all_files, cfg.threads, cfg.progress);
     }
 
     // 3. Export
-    let stats = export::run(&all_files, &cfg.target, cfg.dry_run, cfg.no_dedup, cfg.no_conflict_check)?;
+    let stats = export::run(&all_files, &cfg.target, cfg.dry_run, cfg.no_dedup, cfg.no_conflict_check, cfg.progress)?;
 
     // 4. Summary
     if cfg.summary {

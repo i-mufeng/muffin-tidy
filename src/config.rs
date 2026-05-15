@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use clap::Parser;
@@ -36,7 +34,7 @@ pub struct Cli {
     pub config: PathBuf,
 
     /// 日志等级
-    #[arg(long, default_value = "info", env = "MEDIASORT_LOG")]
+    #[arg(long, default_value = "info", env = "MTIDY_LOG")]
     pub log_level: String,
 
     /// 日志格式：text | json
@@ -112,7 +110,7 @@ pub struct FileConfig {
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
-    pub logging: LoggingConfig,
+    pub logging: LogConfig,
     #[serde(default)]
     pub export: ExportConfig,
     #[serde(default)]
@@ -137,36 +135,14 @@ impl Default for GeneralConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingConfig {
-    pub level: String,
-    pub format: LogFormat,
-    pub file: Option<PathBuf>,
-    pub show_progress: bool,
-    pub show_summary: bool,
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            level: "info".into(),
-            format: LogFormat::Text,
-            file: None,
-            show_progress: true,
-            show_summary: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportConfig {
     pub no_dedup: bool,
     pub no_conflict_check: bool,
-    pub overwrite_existing: bool,
 }
 
 impl Default for ExportConfig {
     fn default() -> Self {
-        Self { no_dedup: false, no_conflict_check: false, overwrite_existing: false }
+        Self { no_dedup: false, no_conflict_check: false }
     }
 }
 
@@ -223,6 +199,7 @@ pub struct RunConfig {
     pub max_depth: usize,
     pub include_hidden: bool,
     pub threads: usize,
+    pub progress: bool,
     pub summary: bool,
     pub filters: FiltersConfig,
     pub livephoto: LivePhotoConfig,
@@ -275,6 +252,7 @@ impl RunConfig {
             max_depth: cli.max_depth,
             include_hidden: cli.include_hidden,
             threads: if cli.threads > 0 { cli.threads } else { file_cfg.general.threads },
+            progress: cli.progress,
             summary: cli.summary,
             filters: file_cfg.filters,
             livephoto: file_cfg.livephoto,

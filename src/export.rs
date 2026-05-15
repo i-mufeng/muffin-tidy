@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,11 +9,6 @@ use tracing::{info, warn, error};
 use crate::media::{MediaFile, MediaType};
 use crate::dedup::DedupRegistry;
 use crate::logger;
-
-pub struct ExportPlan {
-    pub src: PathBuf,
-    pub dst: PathBuf,
-}
 
 pub struct ExportStats {
     pub exported_img: u32,
@@ -38,17 +31,18 @@ impl ExportStats {
     }
 }
 
-pub fn resolve_output_path(dir: &Path, type_prefix: &str, ts: &DateTime<Local>, ext: &str) -> PathBuf {
+const MAX_SEQ: u32 = 9999;
+
+pub fn resolve_output_path(dir: &Path, type_prefix: &str, ts: &DateTime<Local>, ext: &str) -> Result<PathBuf> {
     let base = format!("{}-{}", type_prefix, ts.format("%Y%m%d%H%M%S"));
-    let mut seq = 1u32;
-    loop {
+    for seq in 1..=MAX_SEQ {
         let filename = format!("{}-{:02}.{}", base, seq, ext.to_lowercase());
         let candidate = dir.join(&filename);
         if !candidate.exists() {
-            return candidate;
+            return Ok(candidate);
         }
-        seq += 1;
     }
+    anyhow::bail!("序号溢出：{} 目录下同时间戳文件超过 {} 个", dir.display(), MAX_SEQ)
 }
 
 /// Returns the resolved destination path, or `None` if the source is identical
@@ -61,8 +55,7 @@ pub fn resolve_output_path_dedup(
     ext: &str,
 ) -> Result<Option<PathBuf>> {
     let base = format!("{}-{}", type_prefix, ts.format("%Y%m%d%H%M%S"));
-    let mut seq = 1u32;
-    loop {
+    for seq in 1..=MAX_SEQ {
         let filename = format!("{}-{:02}.{}", base, seq, ext.to_lowercase());
         let candidate = dir.join(&filename);
         if !candidate.exists() {
@@ -72,8 +65,8 @@ pub fn resolve_output_path_dedup(
         if files_identical(src, &candidate)? {
             return Ok(None); // same content, skip
         }
-        seq += 1;
     }
+    anyhow::bail!("序号溢出：{} 目录下同时间戳文件超过 {} 个", dir.display(), MAX_SEQ)
 }
 
 fn files_identical(a: &Path, b: &Path) -> Result<bool> {
@@ -102,20 +95,26 @@ pub fn run(
     dry_run: bool,
     no_dedup: bool,
     no_conflict_check: bool,
+    show_progress: bool,
 ) -> Result<ExportStats> {
     let mut registry = DedupRegistry::new();
     let mut stats = ExportStats::new();
 
-    let pb = Arc::new(ProgressBar::new(files.len() as u64));
-    pb.set_style(
-        ProgressStyle::with_template(
-            "  {spinner:.cyan} [{elapsed_precise}] [{bar:38.cyan/blue}] {pos}/{len} ({percent}%) {msg}"
-        )
-        .unwrap_or_else(|_| ProgressStyle::default_bar())
-        .progress_chars("=>-"),
-    );
-    pb.enable_steady_tick(Duration::from_millis(80));
-    logger::set_progress_bar(pb.clone());
+    let pb = if show_progress {
+        let pb = Arc::new(ProgressBar::new(files.len() as u64));
+        pb.set_style(
+            ProgressStyle::with_template(
+                "  {spinner:.cyan} [{elapsed_precise}] [{bar:38.cyan/blue}] {pos}/{len} ({percent}%) {msg}"
+            )
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("=>-"),
+        );
+        pb.enable_steady_tick(Duration::from_millis(80));
+        logger::set_progress_bar(pb.clone());
+        Some(pb)
+    } else {
+        None
+    };
 
     // Live Photo pairs: track which files have already been assigned a dst path
     // so the paired file can reuse the same sequence number.
@@ -127,7 +126,9 @@ pub fn run(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("?");
-        pb.set_message(filename.to_string());
+        if let Some(ref pb) = pb {
+            pb.set_message(filename.to_string());
+        }
 
         // Dedup check
         if !no_dedup {
@@ -135,7 +136,7 @@ pub fn run(
                 if registry.is_duplicate(hash) {
                     warn!(path = %file.source_path.display(), hash = %hash, "跳过重复文件");
                     stats.skipped_dedup += 1;
-                    pb.inc(1);
+                    if let Some(ref pb) = pb { pb.inc(1); }
                     continue;
                 }
                 registry.register(hash);
@@ -152,6 +153,11 @@ pub fn run(
         let month = file.capture_time.format("%m").to_string();
         let dir = target.join(&year).join(&month);
 
+        // Helper macro to avoid repeating the progress bar pattern
+        macro_rules! pb_inc {
+            () => { if let Some(ref pb) = pb { pb.inc(1); } };
+        }
+
         // Resolve destination path
         let dst_opt = if matches!(file.media_type, MediaType::Lpo) {
             if let Some(pair_path) = &file.live_pair {
@@ -164,7 +170,7 @@ pub fn run(
                             Err(e) => {
                                 error!(src = %file.source_path.display(), error = %e, "文件写入失败");
                                 stats.skipped_error += 1;
-                                pb.inc(1);
+                                pb_inc!();
                                 continue;
                             }
                         }
@@ -173,46 +179,62 @@ pub fn run(
                     }
                 } else {
                     let opt = if no_conflict_check {
-                        Ok(Some(resolve_output_path(&dir, file.media_type.prefix(), &file.capture_time, &ext)))
+                        resolve_output_path(&dir, file.media_type.prefix(), &file.capture_time, &ext).map(Some)
                     } else {
                         resolve_output_path_dedup(&file.source_path, &dir, file.media_type.prefix(), &file.capture_time, &ext)
                     };
                     match opt {
-                        Ok(Some(ref p)) => {
+                        Ok(Some(p)) => {
                             lpo_pair_base.insert(file.source_path.clone(), p.with_extension(""));
-                            opt.unwrap()
+                            Some(p)
                         }
                         Ok(None) => None,
                         Err(e) => {
                             error!(src = %file.source_path.display(), error = %e, "文件写入失败");
                             stats.skipped_error += 1;
-                            pb.inc(1);
+                            pb_inc!();
                             continue;
                         }
                     }
                 }
             } else if no_conflict_check {
-                Some(resolve_output_path(&dir, file.media_type.prefix(), &file.capture_time, &ext))
+                match resolve_output_path(&dir, file.media_type.prefix(), &file.capture_time, &ext) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        error!(src = %file.source_path.display(), error = %e, "文件写入失败");
+                        stats.skipped_error += 1;
+                        pb_inc!();
+                        continue;
+                    }
+                }
             } else {
                 match resolve_output_path_dedup(&file.source_path, &dir, file.media_type.prefix(), &file.capture_time, &ext) {
                     Ok(opt) => opt,
                     Err(e) => {
                         error!(src = %file.source_path.display(), error = %e, "文件写入失败");
                         stats.skipped_error += 1;
-                        pb.inc(1);
+                        pb_inc!();
                         continue;
                     }
                 }
             }
         } else if no_conflict_check {
-            Some(resolve_output_path(&dir, file.media_type.prefix(), &file.capture_time, &ext))
+            match resolve_output_path(&dir, file.media_type.prefix(), &file.capture_time, &ext) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    error!(src = %file.source_path.display(), error = %e, "文件写入失败");
+                    stats.skipped_error += 1;
+                    pb_inc!();
+                    continue;
+                }
+            }
         } else {
             match resolve_output_path_dedup(&file.source_path, &dir, file.media_type.prefix(), &file.capture_time, &ext) {
                 Ok(opt) => opt,
                 Err(e) => {
                     error!(src = %file.source_path.display(), error = %e, "文件写入失败");
                     stats.skipped_error += 1;
-                    pb.inc(1);
+                    pb_inc!();
                     continue;
                 }
             }
@@ -222,7 +244,7 @@ pub fn run(
             None => {
                 warn!(src = %file.source_path.display(), "目标已存在相同文件，跳过");
                 stats.skipped_conflict += 1;
-                pb.inc(1);
+                pb_inc!();
                 continue;
             }
             Some(p) => p,
@@ -234,7 +256,7 @@ pub fn run(
             if let Err(e) = copy_file(&file.source_path, &dst) {
                 error!(src = %file.source_path.display(), error = %e, "文件写入失败");
                 stats.skipped_error += 1;
-                pb.inc(1);
+                pb_inc!();
                 continue;
             }
             info!(src = %file.source_path.display(), dst = %dst.display(), "导出文件");
@@ -245,11 +267,13 @@ pub fn run(
             MediaType::Vdo => stats.exported_vdo += 1,
             MediaType::Lpo => stats.exported_lpo += 1,
         }
-        pb.inc(1);
+        pb_inc!();
     }
 
-    pb.finish_and_clear();
-    logger::clear_progress_bar();
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+        logger::clear_progress_bar();
+    }
     Ok(stats)
 }
 
@@ -281,7 +305,7 @@ mod tests {
     #[test]
     fn resolve_path_format() {
         let dir = TempDir::new().unwrap();
-        let p = resolve_output_path(dir.path(), "Img", &fixed_time(), "jpg");
+        let p = resolve_output_path(dir.path(), "Img", &fixed_time(), "jpg").unwrap();
         let name = p.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, "Img-20240512143022-01.jpg");
     }
@@ -289,7 +313,7 @@ mod tests {
     #[test]
     fn resolve_path_ext_lowercase() {
         let dir = TempDir::new().unwrap();
-        let p = resolve_output_path(dir.path(), "Vdo", &fixed_time(), "MOV");
+        let p = resolve_output_path(dir.path(), "Vdo", &fixed_time(), "MOV").unwrap();
         let name = p.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, "Vdo-20240512143022-01.mov");
     }
@@ -299,9 +323,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let ts = fixed_time();
         // Create the first candidate so seq must increment
-        let first = resolve_output_path(dir.path(), "Img", &ts, "jpg");
+        let first = resolve_output_path(dir.path(), "Img", &ts, "jpg").unwrap();
         std::fs::write(&first, b"").unwrap();
-        let second = resolve_output_path(dir.path(), "Img", &ts, "jpg");
+        let second = resolve_output_path(dir.path(), "Img", &ts, "jpg").unwrap();
         let name = second.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, "Img-20240512143022-02.jpg");
     }
